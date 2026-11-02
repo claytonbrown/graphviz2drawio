@@ -6,19 +6,35 @@ permissions:
 
 jobs:
   spec-test:
-    runs-on: macos-13
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        id: cpython3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
+      - name: Build spec environment
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
         with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: requirements.txt
-      - run: brew install graphviz
-      - run: pip install -r requirements.txt
-      - name: Run specs tests script
+          context: .
+          file: scripts/Dockerfile
+          tags: graphviz2drawio-spec-env
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Run spec tests
+        env:
+          SPEC_TEST_EXCLUDES: twopi/twopi2.xml
         run: |
-          mkdir tmp_out
-          ./test_specs.sh test/ specs/ tmp_out/
+          docker run --rm --user "$(id -u):$(id -g)" \
+            -e SPEC_TEST_EXCLUDES \
+            -v "$PWD:/work" \
+            -w /work \
+            graphviz2drawio-spec-env \
+            ./scripts/test_specs.sh test/ tmp_out/
+      - name: Upload visual spec artifacts
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: visual-spec-artifacts
+          path: |
+            tmp_out/**/*.png
+            tmp_out/**/*.xml

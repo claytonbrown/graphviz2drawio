@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 tmp_out/
+tmp_render/
 
 # C extensions
 *.so
@@ -153,3 +154,9 @@ test/**/*.xml
 .idea/modules.xml
 .idea/*.iml
 test/**/*.svg
+
+*.png
+!specs/**/*.png
+triage_decisions.db
+reviews_triage/
+/tmp*

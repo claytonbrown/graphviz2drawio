@@ -24,10 +24,10 @@ class EdgeFactory:
         # pyrefly: ignore  # bad-assignment
         labels: list[Text] = [
             text_from_tag
-            for tag in g
-            if SVG.is_tag(tag, "text")
-            and (text_from_tag := Text.from_svg(tag)) is not None
+            for tag in SVG.findall_recursive(g, "text")
+            if (text_from_tag := Text.from_svg(tag)) is not None
         ]
+
         if (path := SVG.get_first(g, "path")) is not None:
             if "d" in path.attrib:
                 curve = self.curve_factory.from_svg(path.attrib["d"])
@@ -43,7 +43,7 @@ class EdgeFactory:
             if "stroke-dasharray" in path.attrib:
                 line_style = DotAttr.DASHED
         return Edge(
-            sid=g.attrib["id"],
+            sid=_mx_edge_id(g.attrib["id"]),
             fr=fr,
             to=to,
             is_directed=self.is_directed,
@@ -53,3 +53,9 @@ class EdgeFactory:
             stroke_width=stroke_width,
             line_style=line_style,
         )
+
+
+def _mx_edge_id(svg_id: str) -> str:
+    if svg_id.isdecimal():
+        return f"edge{svg_id}"
+    return svg_id

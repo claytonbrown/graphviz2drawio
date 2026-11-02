@@ -1,0 +1,55 @@
+name: Regenerate Linux Specs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  regenerate-linux-specs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5
+      - name: Build spec environment
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf
+        with:
+          context: .
+          file: scripts/Dockerfile
+          tags: graphviz2drawio-spec-env
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Regenerate Linux specs
+        run: docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work graphviz2drawio-spec-env ./scripts/generate_specs.sh test/ specs/linux/
+      - name: Create pull request if specs changed
+        env:
+          BASE_BRANCH: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          PR_BRANCH: automation/regenerate-linux-specs-${{ github.run_id }}
+        run: |
+          git add specs/linux
+          if git diff --cached --quiet -- specs/linux; then
+            echo "No Linux spec changes found."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$PR_BRANCH"
+          git add specs/linux
+          git commit -m "Regenerate Linux specs"
+          git push origin "$PR_BRANCH"
+
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base "$BASE_BRANCH" \
+            --head "$PR_BRANCH" \
+            --title "Regenerate Linux specs" \
+            --body "Regenerated Linux spec XMLs and PNG references in the pinned Docker environment."

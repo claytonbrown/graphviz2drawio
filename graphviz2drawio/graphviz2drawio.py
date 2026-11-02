@@ -1,19 +1,31 @@
 import re
+from collections.abc import Iterable, Mapping
 from io import TextIOBase
 from pathlib import Path
-from typing import TextIO
 
 from pygraphviz import AGraph
 
 from .models.Errors import UnableToParseGraphError
+from .models.Rect import Rect
 from .models.SvgParser import parse_nodes_edges_clusters
 from .mx.MxGraph import MxGraph
+from .mx.Node import Node
 
 
 def convert(
-    graph_to_convert: AGraph | str | TextIOBase | Path | TextIO,
+    graph_to_convert: AGraph | str | TextIOBase | Path,
     layout_prog: str = "dot",
 ) -> str:
+    """Convert a Graphviz graph into draw.io/mxGraph XML.
+
+    :param graph_to_convert: Graphviz input as a ``pygraphviz.AGraph``, a DOT
+        string, a path-like object, or an open text file handle.
+    :param layout_prog: Graphviz layout program to use when rendering the graph
+        to SVG before conversion, such as ``dot``, ``neato``, or ``circo``.
+    :returns: A draw.io-compatible mxGraph XML string.
+    :raises UnableToParseGraphError: If Graphviz does not return SVG output for
+        the graph.
+    """
     graph = _load_pygraphviz_agraph(graph_to_convert)
 
     graph_edges: dict[str, dict] = {
@@ -44,13 +56,113 @@ def convert(
     for n in nodes.values():
         n.enrich_from_graph(graph_nodes[n.gid])
 
+    node_parents, cluster_parents = _cluster_membership(graph, nodes, clusters)
+
     # Put clusters first, so that nodes are drawn in front
-    mx_graph = MxGraph(clusters, nodes, edges)
+    mx_graph = MxGraph(
+        clusters,
+        nodes,
+        edges,
+        node_parents=node_parents,
+        cluster_parents=cluster_parents,
+    )
     return mx_graph.value()
 
 
+def _cluster_membership(
+    graph: AGraph,
+    nodes: Mapping[str, Node],
+    clusters: Mapping[str, Node],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Return nearest rendered cluster parent names for nodes and clusters.
+
+    Graphviz's SVG tells us the rendered cluster rectangles, but not which SVG
+    nodes are children of those rectangles. PyGraphviz still has the DOT
+    subgraph membership, and Graphviz uses the subgraph name as the SVG cluster
+    title, so this bridges the two sources of truth.
+
+    DOT allows a node to be referenced by several clusters even though Graphviz
+    renders it inside only one of them, so a membership candidate only counts
+    when the member's rendered rect actually lies inside the cluster's rect.
+    Names that fail to round-trip through the SVG titles, and clusters without
+    rendered rectangles, simply leave the member parented further up (ultimately
+    at the page root), which keeps its rendered position intact because child
+    geometry is relativized against whichever parent is chosen.
+    """
+    parentable_cluster_names = {
+        name for name, cluster in clusters.items() if cluster.rect is not None
+    }
+    rendered_node_names = set(nodes)
+    node_parents: dict[str, str] = {}
+    cluster_parents: dict[str, str] = {}
+
+    _walk_cluster_membership(
+        graph.subgraphs_iter(),
+        None,
+        nodes,
+        clusters,
+        rendered_node_names,
+        parentable_cluster_names,
+        node_parents,
+        cluster_parents,
+    )
+    return node_parents, cluster_parents
+
+
+def _walk_cluster_membership(
+    subgraphs: Iterable[AGraph],
+    parent_cluster: str | None,
+    nodes: Mapping[str, Node],
+    clusters: Mapping[str, Node],
+    rendered_node_names: set[str],
+    parentable_cluster_names: set[str],
+    node_parents: dict[str, str],
+    cluster_parents: dict[str, str],
+) -> None:
+    for subgraph in subgraphs:
+        subgraph_name = str(subgraph.name) if subgraph.name is not None else None
+        if subgraph_name is not None and subgraph_name in parentable_cluster_names:
+            current_cluster = subgraph_name
+            if parent_cluster is not None and _is_within_cluster(
+                clusters[subgraph_name].rect,
+                clusters[parent_cluster],
+            ):
+                cluster_parents[subgraph_name] = parent_cluster
+        else:
+            current_cluster = parent_cluster
+
+        if current_cluster is not None:
+            for node in subgraph.nodes():
+                node_name = str(node)
+                if node_name in rendered_node_names and _is_within_cluster(
+                    nodes[node_name].rect,
+                    clusters[current_cluster],
+                ):
+                    node_parents[node_name] = current_cluster
+
+        _walk_cluster_membership(
+            subgraph.subgraphs_iter(),
+            current_cluster,
+            nodes,
+            clusters,
+            rendered_node_names,
+            parentable_cluster_names,
+            node_parents,
+            cluster_parents,
+        )
+
+
+def _is_within_cluster(member_rect: Rect | None, cluster: Node) -> bool:
+    cluster_rect = cluster.rect
+    if cluster_rect is None:
+        return False
+    if member_rect is None:
+        return True
+    return cluster_rect.contains(member_rect)
+
+
 def _load_pygraphviz_agraph(  # noqa: PLR0911
-    graph_to_convert: AGraph | str | TextIOBase | Path | TextIO,
+    graph_to_convert: AGraph | str | TextIOBase | Path,
 ) -> AGraph:
     if isinstance(graph_to_convert, AGraph):
         return graph_to_convert
@@ -70,8 +182,7 @@ def _load_pygraphviz_agraph(  # noqa: PLR0911
             # graph_to_convert was a graph / dot string
             return AGraph(string=graph_to_convert)
         return AGraph(filename=graph_to_convert)
-    # pyrefly: ignore  # missing-attribute
-    if hasattr(graph_to_convert, "read") and callable(graph_to_convert.read):
+    if isinstance(graph_to_convert, TextIOBase):
         return AGraph(string=graph_to_convert.read())
     # Use builtin type detection which includes:  hasattr(thing, "open")
     return AGraph(graph_to_convert)

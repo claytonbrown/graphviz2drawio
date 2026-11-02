@@ -1,10 +1,9 @@
-from enum import Enum
+from enum import StrEnum
 
 from . import Shape
 
 
-# Make this subclass StrEnum when dropping Py 3.10 support
-class Styles(Enum):
+class Styles(StrEnum):
     NODE = (
         "verticalAlign={vertical_align};html=1;rounded=0;labelBackgroundColor=none;strokeColor={stroke};"
         "fillColor={fill};strokeWidth={stroke_width};dashed={dashed};"
@@ -16,6 +15,8 @@ class Styles(Enum):
     EDGE_LABEL = (
         "edgeLabel;html=1;align=center;verticalAlign=bottom;resizable=0;points=[];"
     )
+    EDGE_ANCHOR_EXIT = "exitX={x:.3f};exitY={y:.3f};"
+    EDGE_ANCHOR_ENTRY = "entryX={x:.3f};entryY={y:.3f};"
     EDGE_INVIS = (
         "rounded=1;html=1;exitX={exit_x:.3g};exitY={exit_y:.3g};jettySize=auto;curved={curved};"
         "endArrow={end_arrow};dashed={dashed};endFill={end_fill};"
@@ -94,9 +95,6 @@ class Styles(Enum):
         if dot_shape in _shape_to_style:
             return _shape_to_style[dot_shape]
         return Styles.NODE
-
-    def format(self, **values) -> str:  # noqa: ANN003
-        return self.value.format(**values)
 
 
 _shape_to_style: dict[str, "Styles"] = {
